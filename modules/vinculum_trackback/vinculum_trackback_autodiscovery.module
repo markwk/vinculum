@@ -23,10 +23,10 @@ function vinculum_trackback_autodiscovery_vinculum_send($target, $source, $node)
   // Use auto-discovery to check that the external URL supports trackback.
   if ($trackback_endpoint_url = vinculum_trackback_autodiscovery_autodetect_trackback_support($target)) {
     $params = array(
-      'url' => url("node/{$node->nid}", array('absolute' => TRUE)), 
+      'url' => url("node/{$node->nid}", array('absolute' => TRUE)),
       'title' => $node->title,
       // @TODO: extract an excerpt.
-      // 'excerpt' => 
+      // 'excerpt' =>
     );
 
     // Allow other modules to change the data sent to the remote site, via

@@ -9,6 +9,9 @@
  */
 function vinculum_trackback_receive($node) {
 
+  // very stupid, but gives time to the 'from' server to publish !
+  sleep(1);
+
   // Validate the incoming trackback data.
   if (!_vinculum_trackback_is_request_valid()) {
     // Log the failure.
@@ -24,8 +27,9 @@ function vinculum_trackback_receive($node) {
     $params = array(
       '%method' => $_SERVER['REQUEST_METHOD'],
       '!node' => l($node->title, "node/{$node->nid}"),
+      '@err' => $err,
     );
-    watchdog('Trackback', 'Received an invalid trackback request for !node.' . $err, $params, WATCHDOG_DEBUG);
+    watchdog('Trackback', 'Received an invalid trackback request for !node. @err', $params, WATCHDOG_DEBUG);
 
     // Abort early for invalid requests.
     $msg = t('Malformed Trackback request: requests must use POST and provide a url.  See http://www.sixapart.com/pronet/docs/trackback_spec#Sending_a_TrackBack_Ping');

@@ -62,13 +62,14 @@ function vinculum_help($path, $arg) {
   switch ($path) {
     // Main help for the Vinculum module.
     case 'admin/help#vinculum':
-      break;
+      return '<h3>' . t("Über") . '</h3>' .
+      t('<p>Vinculum provides the pingback and trackback protocols for sending and receiving. Auto-discovery is supported.<p><p><em>Vinculum</em> is the latin word for a link in a chain (and coincidentally the heart of a Borg ship).</p>') .
+      '<h3>' . t("Configuration") . '</h3>' .
+      t('<p>By default sending and receiving is enabled for all <a href="@types">content types</a> by default. Each nodes permits to set the send and receive behavior.</p><p>Please visit the configuration pages below.</p>', array('@types' => url('admin/structure/types')));
 
     // The configuration page.
     case 'admin/config/content/vinculum':
-      $output = '';
-      $output .= '<p>' . t('The vinculum handlers are prioritised by module-weight.') . '</p>';
-      return $output;
+      return '<p>' . t('The vinculum handlers are prioritised by module-weight.') . '</p>';
   }
 }
 
@@ -264,8 +265,6 @@ function vinculum_node_update($node) {
   _vinculum_node_save($node);
 }
 
-
-
 /**
  * Implements hook_vinculum_get_external_links().
  * Gets all the URLs found in the body field of a node.
@@ -288,11 +287,11 @@ function vinculum_vinculum_link_send_alter(&$links, $node) {
   foreach ($links as $key => $record) {
     $language = (isset($node->language)) ? $node->language : LANGUAGE_NONE;
     if ($url = drupal_lookup_path('alias', $record->source, $language)) {
+      watchdog('Vinculum', "Alter URL before send from %source to %url for target %key", array('%key' => $key, '%url' => $url, '%source' => $record->source), WATCHDOG_DEBUG);
       $links[$key]->source = $url;
     }
   }
 }
-
 
 
 /**********************************************************
@@ -342,12 +341,13 @@ function vinculum_receive(vinculum $vinculum) {
     ))
     ->execute();
 
+  watchdog('Vinculum', 'Vinculum received from !source to node !node by %handler.', array('!source' => l($vinculum->url, $vinculum->url), '!node' => l('node/' . $vinculum->nid, 'node/' . $vinculum->nid), '%handler' => $vinculum->handler), WATCHDOG_INFO);
+
   // Fire hook_vinculum_received_action().
   // Actions are implemented through:
   // - vinculum_trigger - supports the core trigger module.
   // - vinculum_rules - integrates with the rules module.
   module_invoke_all('vinculum_received_action', $vinculum);
-
 }
 
 
@@ -387,7 +387,9 @@ function vinculum_receive_validate(vinculum $vinculum) {
     $result = drupal_http_request($vinculum->url);
 
     // Treat all HTTP errors (inc Forbidden) as remote URL not found.
-    if ($result->error) {
+    //@FIXED:
+    // Notice: Undefined property: stdClass::$error in vinculum_receive_validate() (Zeile 390 von vinculum/vinculum.module).
+    if (!empty($result->error)) {
       return VINCULUM_ERROR_REMOTE_URL_NOT_FOUND;
     }
 
@@ -412,7 +414,6 @@ function vinculum_receive_validate(vinculum $vinculum) {
   return VINCULUM_VALIDATES;
 }
 
-
 /**
  * Parse a node and send vinculums to the discovered URLs (which haven't
  * already recorded a successful vinculum).
@@ -422,11 +423,13 @@ function vinculum_receive_validate(vinculum $vinculum) {
  *
  * @param Object $node
  * A fully loaded node object (or one which is in the process of being saved).
+ * @param Boolean $message
+ * TRUE if a message should printed to the user, FALSE otherwise.
  */
-function vinculum_node_process($node) {
+function vinculum_node_process($node, $message = TRUE) {
   // Look for external links.
   $links = vinculum_get_external_links($node);
-  vinculum_send_vinculums($links, $node);
+  vinculum_send_vinculums($links, $node, $message);
 }
 
 /**
@@ -478,14 +481,17 @@ function vinculum_get_external_links($node) {
   return $links;
 }
 
-
 /**
  * Invoke vinculum handlers on each external link to record a vinculum.
  *
  * @param Array $links
  * An array of external URLs.
+ * @param Object $node
+ * The local node object.
+ * @param Boolean $message
+ * TRUE if a message should printed to the user, FALSE otherwise.
  */
-function vinculum_send_vinculums($links, $node) {
+function vinculum_send_vinculums($links, $node, $message = TRUE) {
   // The initial source URL is defined as node/xxx.  The vinculum module
   // provides an implementation of hook_vinculum_link_send_alter for the path
   // module to support node-aliases.
@@ -508,7 +514,7 @@ function vinculum_send_vinculums($links, $node) {
 
   foreach ($records as $record) {
     if (!vinculum_is_sent($node->nid, $record->target)) {
-      vinculum_send_single_vinculum($record->source, $record->target, $node);
+      vinculum_send_single_vinculum($record->source, $record->target, $node, $message);
     }
   }
 }
@@ -522,11 +528,13 @@ function vinculum_send_vinculums($links, $node) {
  * The URL of the remote page.
  * @param Object $node
  * The local node object.
+ * @param Boolean $message
+ * TRUE if a message should printed to the user, FALSE otherwise.
  *
  * @return Boolean
  * TRUE if the remote server accepts the vinculum request.
  */
-function vinculum_send_single_vinculum($source, $target, $node) {
+function vinculum_send_single_vinculum($source, $target, $node, $message = TRUE) {
   // Record the timestamp of this attempt in the {node_vinculum_sent} table.
   // This allows vinculums which have not been successful to be re-attempted
   // periodically.
@@ -553,12 +561,15 @@ function vinculum_send_single_vinculum($source, $target, $node) {
     // If the handler reports success, log this as a successful request.
     if ($success) {
       $params = array(
-        '%target'     => $target,
-        '@node_url'   => url("node/{$node->nid}"),
+        '!target'     => l($target, $target),
+        '!node'   => l($node->title, "node/{$node->nid}"),
         '%node_title' => $node->title,
         '%handler'    => $handler->module,
       );
-      watchdog('Vinculum', 'Vinculum sent to %target for node <a href="@node_url">%node_title</a> using %handler.', $params, WATCHDOG_DEBUG);
+      watchdog('Vinculum', 'Vinculum sent to !target for node !node using %handler.', $params, WATCHDOG_INFO);
+      if ($message) {
+        drupal_set_message(t('Vinculum sent to !target for node !node using %handler.', $params));
+      }
 
       db_merge('node_vinculum_sent')
         ->key(array(
@@ -575,14 +586,13 @@ function vinculum_send_single_vinculum($source, $target, $node) {
   }
 
   $params = array(
-    '%target'     => $target,
+    '@target'     => $target,
     '@node_url'   => url("node/{$node->nid}"),
     '%node_title' => $node->title,
   );
-  watchdog('Vinculum', 'Vinculum could not be sent to %target for node <a href="@node_url">%node_title</a> - no vinculum support found.', $params, WATCHDOG_DEBUG);
+  watchdog('Vinculum', 'Vinculum could not be sent to <em><a href="@target">@target</a></em> for node <a href="@node_url">%node_title</a> - no vinculum support found.', $params, WATCHDOG_DEBUG);
   return FALSE;
 }
-
 
 /**
  * Fetch the node nid from a local URL.
@@ -734,7 +744,6 @@ function vinculum_set_weights($weights) {
 }
 
 
-
 /**********************************************************
  * Private API handlers.
  *********************************************************/
@@ -769,6 +778,11 @@ function _vinculum_node_get_settings($nids) {
  * vinculums as needed.
  */
 function _vinculum_node_save($node) {
+  // Unpublished nodes cannot communicate, abort the Vinculum sending process.
+  if ($node->status == 0) {
+    return FALSE;
+  }
+
   // If a custom send/receive setting has not been provided, use the default
   // setting for this node-type.
   $settings = array(
@@ -788,10 +802,50 @@ function _vinculum_node_save($node) {
     ))
     ->execute();
 
+  // vinculum_node_process($node) cannot be called now as on node creation
+  // the node is not yet published and accessible. We are in the middle of
+  // the creation process.
+  // Do it in hook_exit or hook_cron as the Pingback Drupal 6 module.
+  if ($settings['send'] && (variable_get('vinculum_send_mode', 'submit') == 'submit')) {
+    global $_vinculum_nid;
+    $_vinculum_nid = $node->nid;
+    //@REMOVE dpm($_vinculum_nid, '_vinculum_node_save $_vinculum_nid');
+  } else { //mode == 'cron'
+    //queue this nid in variable pingback_nid_queue, but take care for not queuing existing nids
+    $q = variable_get('vinculum_nid_queue', array());
+    if (!in_array($node->nid, $q)) {
+      $q[] = $node->nid;
+      variable_set('vinculum_nid_queue', $q);
+    }
+  }
+}
 
-  if ($settings['send']) {
-    // TODO: do this now or later?
-    vinculum_node_process($node);
+/**
+* Implementation of hook_cron().
+* Adapted from Pingback Drupal 6 module.
+*/
+function vinculum_cron() {
+  $q = variable_get('vinculum_nid_queue', array());
+  $limit = variable_get('vinculum_check_per_cron', 30);
+  $count = 0;
+  while (($nid = array_shift($q)) && ($count++ < $limit)) {
+    $node = node_load($nid);
+    vinculum_node_process($node, FALSE);
+  }
+  variable_set('vinculum_nid_queue', $q);
+}
+
+/**
+* Implementation of hook_exit().
+* Adapted from Pingback Drupal 6 module.
+*/
+function vinculum_exit() {
+  global $_vinculum_nid;
+  if (!empty($_vinculum_nid)) {
+    watchdog('Vinculum', "Processing node/%node for Vinculum send.", array('%node' => $_vinculum_nid,), WATCHDOG_DEBUG);
+    // Reset the node_load() cache.
+    $node = node_load($_vinculum_nid, NULL, TRUE);
+    vinculum_node_process($node, variable_get('vinculum_notify_successful_pings', 1));
   }
 }
 
@@ -919,8 +973,22 @@ function _vinculum_extract_urls($text) {
   // Regexp is stolen from trackback.module ;)
   preg_match_all("/(http|https):\/\/[a-zA-Z0-9@:%_~#?&=.,\/;-]*[a-zA-Z0-9@:%_~#&=\/;-]/", $text, $matches);
 
-  // TODO: check that the URLs are external, and not local FQDN?
+  $links = array_unique(array_merge($links, $matches[0]));
+  //@REMOVE dpm($links, '$links');
 
-  $links = array_merge($links, $matches[0]);
-  return array_unique($links);
+  global $base_url;
+  $self = preg_quote($base_url);
+// Anonymos functions (closures) are only available since PHP 5.3.0,
+// so keep compatibility with PHP 5.2.
+//   $links = array_filter($links, function ($element) use ($self) {
+//     return preg_match("|^$self|", $element) != 1;
+//   } );
+  foreach ($links as $key => $element) {
+    if(preg_match("|^$self|", $element) == 1) {
+      unset($links[$key]);
+    }
+  }
+  //@REMOVE dpm($links, '$links');
+
+  return $links;
 }

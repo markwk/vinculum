@@ -124,7 +124,9 @@ function vinculum_trackback_send_trackback($endpoint_url, $params) {
   );
   $result = drupal_http_request($endpoint_url, $options);
 
-  if ($result->data) {
+  //@FIXED
+  //Notice: Undefined property: stdClass::$data in vinculum_trackback_send_trackback() (line 127 of /vinculum/modules/vinculum_trackback/vinculum_trackback.module).
+  if (!empty($result->data)) {
     list($error, $message) = _vinculum_trackback_parse_response($result->data);
 
     // Log the error.
@@ -135,6 +137,7 @@ function vinculum_trackback_send_trackback($endpoint_url, $params) {
         '!verbose_output' => filter_xss(str_replace("\n", "<br />\n", htmlentities($result->data))),
       );
       watchdog('Trackback', 'Trackback response for endpoint %url could not be parsed as XML.<br />!verbose_output', $params, WATCHDOG_DEBUG);
+      //@REMOVE drupal_set_message(t('Trackback response for endpoint %url could not be parsed as XML.<br />!verbose_output', $params), 'warning');
     }
     elseif ($error && $message) {
       $params = array(
@@ -142,14 +145,24 @@ function vinculum_trackback_send_trackback($endpoint_url, $params) {
         '!verbose_output' => filter_xss(str_replace("\n", "<br />\n", htmlentities($message))),
       );
       watchdog('Trackback', 'Trackback failed for endpoint %url with the message:<br />!verbose_output', $params, WATCHDOG_DEBUG);
+      //@REMOVE drupal_set_message(t('Trackback failed for endpoint %url with the message:<br />!verbose_output', $params), 'warning');
     }
     elseif ($error) {
       $params = array(
         '%url' => $endpoint_url,
       );
       watchdog('Trackback', 'Trackback failed for endpoint %url. No error message was provided.', $params, WATCHDOG_DEBUG);
+      //@REMOVE drupal_set_message(t('Trackback failed for endpoint %url. No error message was provided.', $params), 'warning');
     }
 
+    if ($error === FALSE) {
+      $params = array(
+        '%url' => $endpoint_url,
+        '!verbose_output' => filter_xss(str_replace("\n", "<br />\n", htmlentities($message))),
+      );
+      watchdog('Trackback', 'Trackback for endpoint %url succeeded: <br />!verbose_output.', $params, WATCHDOG_DEBUG);
+      //@REMOVE drupal_set_message(t('Trackback for endpoint %url succeeded: <br />!verbose_output.', $params));
+    }
     return ($error === FALSE);
   }
 }
@@ -217,6 +230,29 @@ function _vinculum_get_trackback_endpoint($node) {
 }
 
 /**
+ * Write the auto auto-discover Trackback descripton.
+ *
+ * @param Object $url
+ *   URL that supports auto-discovery.
+ * @param Object $node
+ *   A drupal node.
+ *
+ * @return String
+ * The URL of the Trackback endpoint.
+ */
+function _vinculum_add_trackback_autodiscovery_metadata_description($url, $node) {
+  // Get the Trackback endpoint for this specific node.
+  $tb_url = _vinculum_get_trackback_endpoint($node);
+
+  $rdf_text = "\t" . '<rdf:Description';
+  $rdf_text .= ' rdf:about="' . $url . '"';
+  $rdf_text .= ' dc:identifier="' . $url . '"';
+  $rdf_text .= ' dc:title="' . strtr(check_plain($node->title), array('--' => '&mdash;')) . '"';
+  $rdf_text .= ' trackback:ping="' . $tb_url . '" />' . "\n";
+  return $rdf_text;
+}
+
+/**
  * Add the RDF meta-data which allows third-party sites to auto-discover
  * Trackback support.
  *
@@ -226,17 +262,18 @@ function _vinculum_add_trackback_autodiscovery_metadata($node) {
 
   // Get the canonical URL to this node.
   $url = url("node/{$node->nid}", array('absolute' => TRUE));
-
-  // Get the Trackback endpoint for this specific node.
-  $tb_url = _vinculum_get_trackback_endpoint($node);
+  // Get the short URL to this node
+  $short_url = url("node/{$node->nid}", array('absolute' => TRUE, 'alias' => TRUE));
 
   $rdf_text = "\n<!--\n";
   $rdf_text .= '<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:trackback="http://madskills.com/public/xml/rss/module/trackback/">' . "\n";
-  $rdf_text .= "\t" . '<rdf:Description';
-  $rdf_text .= ' rdf:about="' . $url . '"';
-  $rdf_text .= ' dc:identifier="' . $url . '"';
-  $rdf_text .= ' dc:title="' . strtr(check_plain($node->title), array('--' => '&mdash;')) . '"';
-  $rdf_text .= ' trackback:ping="' . $tb_url . '" />' . "\n";
+  $rdf_text .= _vinculum_add_trackback_autodiscovery_metadata_description($url, $node);
+  if ($short_url != $url) {
+    // Add also the basic short URL node/nid in order to accept auto-discovery
+    // of this URL. Remote sites may link to node/nid in order to be robust
+    // against alias changes.
+    $rdf_text .= _vinculum_add_trackback_autodiscovery_metadata_description($short_url, $node);
+  }
   $rdf_text .= '</rdf:RDF>';
   $rdf_text .= "\n-->\n";
 

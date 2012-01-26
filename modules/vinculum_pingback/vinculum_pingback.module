@@ -69,8 +69,11 @@ function vinculum_pingback_vinculum_handler() {
  * @ingroup vinculum
  */
 function vinculum_pingback_vinculum_send($target, $source, $node) {
+  //$source = url("node/{$node->nid}", array('absolute' => TRUE));
+  $source = url($source, array('absolute' => TRUE, 'alias' => TRUE));
   // Check whether the remote target supports pingbacks.
   if ($xmlrpc_endpoint = vinculum_pingback_target_supports_pingback($target)) {
+    //@REMOVE drupal_set_message(t('Pingback supported to @target', array('@target' => $target, '@source' => $source,)));
     $methods = array(
       'pingback.ping' => array($source, $target),
     );
@@ -79,8 +82,10 @@ function vinculum_pingback_vinculum_send($target, $source, $node) {
       $params = array(
         '%source' => $source,
         '%target' => $target,
+        '@result' => $result,
       );
-      watchdog('pingback', 'Pingback to %target from %source succeeded.', $params, WATCHDOG_INFO);
+      watchdog('Pingback', 'Pingback to %target from %source succeeded.<br/>Return value: @result.', $params, WATCHDOG_INFO);
+      //@REMOVE drupal_set_message(t('Pingback to %target from %source succeeded.<br/>Return value: @result.', $params));
       return TRUE;
     }
     else {
@@ -90,7 +95,8 @@ function vinculum_pingback_vinculum_send($target, $source, $node) {
         '@errno' => xmlrpc_errno(),
         '@description' => xmlrpc_error_msg(),
       );
-      watchdog('pingback', 'Pingback to %target from %source failed.<br />Error @errno: @description', $params, WATCHDOG_WARNING);
+      watchdog('Pingback', 'Pingback to %target from %source failed.<br />Error @errno: @description', $params, WATCHDOG_WARNING);
+      //@REMOVE drupal_set_message(t('Pingback to %target from %source failed.<br />Error @errno: @description', $params), 'warning');
       return FALSE;
     }
   }
@@ -194,14 +200,20 @@ function vinculum_pingback_receive_pingback($sourceURI, $targetURI) {
     'origin_ip' => ip_address(),
   );
 
+  watchdog('Pingback', 'Pingback received from %source to %target.', array('%source' => $sourceURI, '%target' => $targetURI), WATCHDOG_DEBUG);
+
+  // very stupid, but gives time to the 'from' server to publish !
+  sleep(1);
+
   // Attempt to save the pingback.  Non-zero results indicate an error.
   if ($result = vinculum_pingback_save_pingback($pingback)) {
     // Lookup the error message from the error-code, and return an xmlrpc error.
     $error_message = _vinculum_pingback_get_error_message($result);
+    watchdog('Pingback', 'Pingback receive error from %source to %target. Error: @result<br/>Message: @msg', array('@msg' => $error_message, '@result' => $result, '%source' => $sourceURI, '%target' => $targetURI), WATCHDOG_WARNING);
     return xmlrpc_server_error($result, $error_message);
   }
 
-  $message = t('Pingback from @source to @target registered.', array('@source' => $sourceURI, '@target' => $targetURI));
+  $message = t('Pingback from @source to @target registered by Drupal Vinculum. Keep the web talking! :-)', array('@source' => $sourceURI, '@target' => $targetURI));
   return $message;
 }
 
